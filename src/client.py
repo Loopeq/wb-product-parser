@@ -1,10 +1,12 @@
 import asyncio
-import aiohttp
 import logging
-from fake_headers import Headers
-from src.utils import get_card_url
-from tenacity import retry, stop_after_attempt, wait_exponential
 import random
+
+import aiohttp
+from fake_headers import Headers
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from src.utils import get_card_url
 
 HEADER = Headers(
     headers=True
@@ -12,21 +14,10 @@ HEADER = Headers(
 
 SEM = asyncio.Semaphore(20)
 
-async def _proccess_batch(tasks, batch_size: int = 10):
-    results = []
-
-    for i in range(0, len(tasks), batch_size):
-        batch = tasks[i:i + batch_size]
-        batch_results = await asyncio.gather(*batch, return_exceptions=True)
-        results.extend(batch_results)
-
-    return results
-
-
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=2, max=120), reraise=True)
 async def _fetch_page(session, query: str, page: int, limit: int):
     async with SEM:
-        await asyncio.sleep(random.uniform(0.4, 0.8))
+        await asyncio.sleep(random.uniform(0.05, 0.15))
         url = "https://search.wb.ru/exactmatch/ru/common/v4/search"
         params = {
             "resultset": "catalog",
@@ -74,7 +65,10 @@ async def fetch_catalog(query: str, shards: list):
     data = []
     products = []
     page_limit = 100
-    async with aiohttp.ClientSession() as session:
+
+    connector = aiohttp.TCPConnector(limit=100)
+
+    async with aiohttp.ClientSession(connector=connector) as session:
         init_page = await _fetch_page(session=session, query=query, page=1, limit=page_limit)
         total = init_page['total']
         products = init_page['products']
@@ -85,8 +79,8 @@ async def fetch_catalog(query: str, shards: list):
             for page in range(2, pages + 1)
         ]
 
-        pages_results = await _proccess_batch(page_tasks, batch_size=50)
-
+        pages_results = await asyncio.gather(*page_tasks, return_exceptions=True)
+        
         for i, page_data in enumerate(pages_results, start=2):
             if isinstance(page_data, Exception):
                 logging.warning(f"Error while loading page {i}: {page_data}")
@@ -100,7 +94,7 @@ async def fetch_catalog(query: str, shards: list):
             for sku in skus
         ]
 
-        cards_results = await _proccess_batch(card_tasks, batch_size=50)
+        cards_results = await asyncio.gather(*card_tasks, return_exceptions=True)
 
         for product, card in zip(products, cards_results):
             if isinstance(card, Exception):
