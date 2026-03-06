@@ -1,15 +1,28 @@
 
 import asyncio
 from src.client import fetch_catalog, fetch_shards
-from src.proccess import process_catalog 
+from src.normalize import normalize_catalog, filter_catalog
+from src.export import export
 
-async def search(query: str, filename: str = None, **filters):
+async def run(query: str):
     shards = await fetch_shards()
     catalog = await fetch_catalog(query=query, shards=shards)
-    process_catalog(catalog=catalog, shards=shards, filename=filename)
     
+    rows = normalize_catalog(catalog, shards)
+    export(rows, 'catalog_base.xlsx')
+
+    filters = {
+        'rating': {"gte": 4.5},
+        'price': {'lte': 10000},
+        'country': {'eq': 'Россия'}
+    }
+
+    rows = filter_catalog(rows, filters)
+
+    export(rows, "catalog_filtered.xlsx")
+        
 async def main():
-    await search(query='пальто из натуральной шерсти', filename='base_catalog.xlsx')
+    await run(query='пальто из натуральной шерсти')
     
 if __name__ == "__main__": 
     asyncio.run(main())
